@@ -1,0 +1,15 @@
+# Video files — store these in the shared Drive folder, not the repo
+*.mp4
+*.MOV
+*.mov
+*.avi
+
+# Generated output
+velocity_plot.png
+output_with_pose*.mp4
+data/results*.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

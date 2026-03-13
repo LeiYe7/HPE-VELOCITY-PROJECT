@@ -31,9 +31,15 @@ from velocity_tracker import (
 # Video file registry
 # ---------------------------------------------------------------------------
 
+# Set the VIDEO_DIR environment variable to point to your local video folder.
+# e.g. on Windows:  set VIDEO_DIR=C:\Users\you\Videos\squat-tests
+# e.g. on Mac/Linux: export VIDEO_DIR=/home/you/Videos/squat-tests
+# If not set, defaults to the current directory.
+VIDEO_DIR = os.environ.get('VIDEO_DIR', '.')
+
 VIDEOS = {
-    'front': 'Front-View Squat - 30fps Trim.mp4',
-    'side':  'Side-view Squat 30fps (2) - Trim.mp4',
+    'front': os.path.join(VIDEO_DIR, 'Front-View Squat - 30fps Trim.mp4'),
+    'side':  os.path.join(VIDEO_DIR, 'Side-view Squat 30fps (2) - Trim.mp4'),
 }
 
 
@@ -101,9 +107,13 @@ def run_post_processing(
       4. Save CSV data
       5. (Optional) Write annotated video with skeleton overlay
     """
-    video_path = VIDEOS.get(video_key)
+    # Accept either a named key ('front'/'side') or a direct file path
+    if os.path.isfile(video_key):
+        video_path = video_key
+    else:
+        video_path = VIDEOS.get(video_key)
     if video_path is None:
-        print(f"Unknown video key '{video_key}'. Choose from: {list(VIDEOS.keys())}")
+        print(f"Unknown video key '{video_key}'. Use 'front', 'side', or a direct file path.")
         sys.exit(1)
 
     if not os.path.exists(video_path):
@@ -184,8 +194,11 @@ def parse_args() -> argparse.Namespace:
         description="HPE Velocity Tracking System – barbell squat analysis"
     )
     parser.add_argument(
-        '--video', choices=['front', 'side'], default='front',
-        help="Which video to process (default: front)",
+        '--video', default='front',
+        help=(
+            "Which video to process. Use 'front' or 'side' for the default test videos, "
+            "or provide a full file path to any video (default: front)"
+        ),
     )
     parser.add_argument(
         '--ppm', type=float, default=None, metavar='PIXELS_PER_METRE',
