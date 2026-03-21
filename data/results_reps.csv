@@ -1,2 +1,4 @@
-rep,MCV_px/s,PCV_px/s,duration_s
-1,283.6997194687665,600.7996437799235,1.4959462419866456
+rep,conc_MCV_px/s,conc_PCV_px/s,conc_duration_s,ecc_speed_px_s,ecc_duration_s,speed_loss_pct
+1,5647.6,14058.8,0.28,590.6,0.12,0.0
+2,943.9,2218.5,0.15,171.3,1.37,83.3
+3,2463.6,7656.3,1.15,23206.6,0.13,56.4

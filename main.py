@@ -1,20 +1,11 @@
 """
 HPE Velocity Tracking System — Main Entry Point
-Barbell Back Squat Analysis using MediaPipe BlazePose
+Squat Speed Analysis using MediaPipe BlazePose
 
-Usage (post-processing):
-    python main.py                          # front-view video, no calibration
-    python main.py --video side             # side-view video
-    python main.py --ppm 320               # calibrated: 320 pixels per metre
-    python main.py --realtime              # live camera feed
-
-Calibration tip:
-    A standard Olympic barbell is 2.2 m wide.  Measure how many pixels span
-    the barbell in one frame (e.g. using paint or any image viewer), then:
-        pixels_per_meter = <pixel_width_of_barbell> / 2.2
+To run: python main.py
+To select a video, edit the CONFIG block inside main() at the bottom of this file.
 """
 
-import argparse
 import os
 import sys
 
@@ -23,7 +14,7 @@ import pandas as pd
 from velocity_tracker import (
     calculate_hip_velocity,
     plot_velocity,
-    visualise_pose,
+    visualise_pose_with_velocity,
     SquatVelocityTracker,
 )
 
@@ -31,15 +22,24 @@ from velocity_tracker import (
 # Video file registry
 # ---------------------------------------------------------------------------
 
-# Set the VIDEO_DIR environment variable to point to your local video folder.
-# e.g. on Windows:  set VIDEO_DIR=C:\Users\you\Videos\squat-tests
-# e.g. on Mac/Linux: export VIDEO_DIR=/home/you/Videos/squat-tests
-# If not set, defaults to the current directory.
-VIDEO_DIR = os.environ.get('VIDEO_DIR', '.')
+# Test videos are not included in the repository due to size, but is submitted in a separate file included on the report
+# Replace this path with the folder containing your video files.
+# The environment variable VIDEO_DIR takes precedence if set.
+VIDEO_DIR = os.environ.get('VIDEO_DIR', r'C:\Users\tommy\OneDrive\Documents\DSP test')
+
+# Output videos are saved here (outside the repo to avoid committing large files).
+# Replace with your preferred local output folder.
+OUTPUT_DIR = os.environ.get('OUTPUT_DIR', r'C:\Users\tommy\OneDrive\Documents\DSP test\output')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 VIDEOS = {
-    'front': os.path.join(VIDEO_DIR, 'Front-View Squat - 30fps Trim.mp4'),
-    'side':  os.path.join(VIDEO_DIR, 'Side-view Squat 30fps (2) - Trim.mp4'),
+    'normal': os.path.join(VIDEO_DIR, 'Normal Tempo - Front.mp4'),
+    'slow':  os.path.join(VIDEO_DIR, 'Slow Tempo - Front.mp4'),
+    'fast':  os.path.join(VIDEO_DIR, 'Fast Tempo - Front.mp4'),
+    'partial':  os.path.join(VIDEO_DIR, 'Partial Rep - Front.mp4'),
+    'bf':  os.path.join(VIDEO_DIR, 'Bad Form - Front.mp4'),
+    'foc':  os.path.join(VIDEO_DIR, 'Front Occlusion .mp4'),
+    'normal-side':  os.path.join(VIDEO_DIR, 'Normal Tempo - Side .mp4'),
 }
 
 
@@ -57,7 +57,7 @@ def save_results_csv(results: dict, path: str = 'data/results.csv') -> None:
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    unit = results.get('unit', 'px/s')
+    unit = results.get('unit', 'px/s')  # 'm/s' when calibrated, 'px/s' otherwise
 
     # Frame-level data
     frame_df = pd.DataFrame({
@@ -72,12 +72,16 @@ def save_results_csv(results: dict, path: str = 'data/results.csv') -> None:
     # Per-rep metrics
     reps = results.get('reps', [])
     if reps:
+        baseline_mcv = reps[0].mean_velocity if reps[0].mean_velocity else 1.0
         rep_df = pd.DataFrame([
             {
                 'rep':               i + 1,
-                f'MCV_{unit}':       r.mean_velocity,
-                f'PCV_{unit}':       r.peak_velocity,
-                'duration_s':        r.duration,
+                f'conc_MCV_{unit}':  round(r.mean_velocity, 1),
+                f'conc_PCV_{unit}':  round(r.peak_velocity, 1),
+                'conc_duration_s':   round(r.duration, 2),
+                'ecc_speed_px_s':    round(r.eccentric_mean_speed, 1),
+                'ecc_duration_s':    round(r.eccentric_duration, 2),
+                'speed_loss_pct':    round((baseline_mcv - r.mean_velocity) / baseline_mcv * 100, 1),
             }
             for i, r in enumerate(reps)
         ])
@@ -95,7 +99,6 @@ def run_post_processing(
     pixels_per_meter: float | None,
     filter_cutoff: float,
     model_complexity: int,
-    save_annotated: bool,
 ) -> None:
     """
     Full post-processing pipeline for a recorded squat video.
@@ -105,7 +108,8 @@ def run_post_processing(
       2. Print results summary
       3. Save velocity plot
       4. Save CSV data
-      5. (Optional) Write annotated video with skeleton overlay
+      5. Write annotated video with skeleton overlay
+      6. Write side-by-side video with pose + velocity graph
     """
     # Accept either a named key ('front'/'side') or a direct file path
     if os.path.isfile(video_key):
@@ -136,7 +140,7 @@ def run_post_processing(
     # 2. Velocity-time plot
     view_label = video_key.capitalize()
     plot_title = (
-        f"Hip Vertical Velocity – {view_label}-View Squat  "
+        f"Hip Vertical Velocity – {view_label} Squat  "
         f"[{results['unit']}  |  {results['fps']:.0f} FPS]"
     )
     plot_velocity(results, title=plot_title, save_path='velocity_plot.png')
@@ -144,18 +148,17 @@ def run_post_processing(
     # 3. CSV export
     save_results_csv(results, path='data/results.csv')
 
-    # 4. Optional annotated video
-    if save_annotated:
-        annotated_path = f'output_with_pose_{video_key}.mp4'
-        visualise_pose(video_path, output_path=annotated_path, model_complexity=1)
+    # 4. Side-by-side pose + velocity visualization
+    video_label = os.path.splitext(os.path.basename(video_key))[0] if os.path.isfile(video_key) else video_key
+    visual_path = os.path.join(OUTPUT_DIR, f'analyse_{video_label}.mp4')
+    visualise_pose_with_velocity(video_path, results, output_path=visual_path, model_complexity=2)
 
     print("\nAll done.")
     print("  velocity_plot.png     – velocity-time graph")
     print("  data/results_frames.csv – frame-level data")
     if results.get('reps'):
         print("  data/results_reps.csv   – per-rep MCV / PCV")
-    if save_annotated:
-        print(f"  output_with_pose_{video_key}.mp4 – annotated video")
+    print(f"  {visual_path} – pose + velocity visualization")
 
 
 # ---------------------------------------------------------------------------
@@ -186,81 +189,39 @@ def run_realtime(pixels_per_meter: float, filter_cutoff: float) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="HPE Velocity Tracking System – barbell squat analysis"
-    )
-    parser.add_argument(
-        '--video', default='front',
-        help=(
-            "Which video to process. Use 'front' or 'side' for the default test videos, "
-            "or provide a full file path to any video (default: front)"
-        ),
-    )
-    parser.add_argument(
-        '--ppm', type=float, default=None, metavar='PIXELS_PER_METRE',
-        help=(
-            "Calibration: pixels per metre. "
-            "Omit to report in px/s (relative). "
-            "Example: if the barbell spans 660 px → --ppm 300  (660/2.2)"
-        ),
-    )
-    parser.add_argument(
-        '--cutoff', type=float, default=6.0,
-        help="Butterworth low-pass cutoff frequency in Hz (default: 6)",
-    )
-    parser.add_argument(
-        '--complexity', type=int, choices=[0, 1, 2], default=2,
-        help="MediaPipe model complexity: 0=Lite, 1=Full, 2=Heavy (default: 2)",
-    )
-    parser.add_argument(
-        '--annotate', action='store_true',
-        help="Also write an annotated video with the skeleton overlay",
-    )
-    parser.add_argument(
-        '--realtime', action='store_true',
-        help="Run live camera tracker instead of processing a video file",
-    )
-    return parser.parse_args()
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # =========================================================
+    # CONFIGURE HERE — edit these values, then run python main.py
+    # =========================================================
+
+    VIDEO      = 'foc'   # key from VIDEOS dict above, or a full file path
+                           # e.g. 'normal', 'slow', or r'C:\path\to\video.mp4'
+
+    REALTIME   = False     # set True to use live camera instead of a video file
+
+    PPM        = None      # pixels per metre for m/s output (None = use px/s)
+    CUTOFF     = 6.0       # Butterworth filter cutoff in Hz
+    COMPLEXITY = 2         # MediaPipe model: 0=fast/less accurate, 2=slow/most accurate
+
+    # =========================================================
+
     print("\n" + "=" * 60)
     print("  HPE VELOCITY TRACKING SYSTEM")
-    print("  Barbell Back Squat Analysis — MediaPipe BlazePose")
+    print("  Squat Speed Analysis — MediaPipe BlazePose")
     print("=" * 60)
 
-    args = parse_args()
-
-    if args.realtime:
-        ppm = args.ppm if args.ppm else 500.0
-        if args.ppm is None:
-            print(
-                "\nNote: No --ppm supplied. Defaulting to 500 px/m. "
-                "Press 'c' to calibrate with a known distance.\n"
-            )
-        run_realtime(pixels_per_meter=ppm, filter_cutoff=args.cutoff)
+    if REALTIME:
+        ppm = PPM if PPM else 500.0  # rough default; press 'c' in the window to calibrate
+        run_realtime(pixels_per_meter=ppm, filter_cutoff=CUTOFF)
     else:
-        if args.ppm is None:
-            print(
-                "\nNote: No --ppm calibration supplied. "
-                "Velocities will be reported in px/s (relative units). "
-                "For true m/s, measure the barbell span in pixels and pass "
-                "--ppm <pixels> / 2.2 (Olympic bar = 2.2 m).\n"
-            )
         run_post_processing(
-            video_key=args.video,
-            pixels_per_meter=args.ppm,
-            filter_cutoff=args.cutoff,
-            model_complexity=args.complexity,
-            save_annotated=args.annotate,
+            video_key=VIDEO,
+            pixels_per_meter=PPM,
+            filter_cutoff=CUTOFF,
+            model_complexity=COMPLEXITY,
         )
 
 
