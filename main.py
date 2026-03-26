@@ -39,7 +39,17 @@ VIDEOS = {
     'partial':  os.path.join(VIDEO_DIR, 'Partial Rep - Front.mp4'),
     'bf':  os.path.join(VIDEO_DIR, 'Bad Form - Front.mp4'),
     'foc':  os.path.join(VIDEO_DIR, 'Front Occlusion .mp4'),
+    'soc':  os.path.join(VIDEO_DIR, 'Side Occlusion.mp4'),
     'normal-side':  os.path.join(VIDEO_DIR, 'Normal Tempo - Side .mp4'),
+    'baggy':  os.path.join(VIDEO_DIR, 'Baggy Clothing - Front .mp4'),
+    '720-30':  os.path.join(VIDEO_DIR, '720p - 30fps - Front.mp4'),
+    '480-24':  os.path.join(VIDEO_DIR, '480p - 24fps - Front.mp4'),
+    'equipment':  os.path.join(VIDEO_DIR, 'Equipment - Front .mp4'),
+    'close-side':  os.path.join(VIDEO_DIR, 'Close Camera - Side.mp4'),
+    'close':  os.path.join(VIDEO_DIR, 'Close Camera - Front .mp4'),
+    'HPESIDE':  os.path.join(VIDEO_DIR, 'HPESIDE.mp4'),
+    'HPESIDE - MOV':  os.path.join(VIDEO_DIR, 'HPESIDE.MOV'),
+    
 }
 
 
@@ -99,6 +109,11 @@ def run_post_processing(
     pixels_per_meter: float | None,
     filter_cutoff: float,
     model_complexity: int,
+    confidence_threshold: float,
+    max_missing_frames: int,
+    velocity_threshold: float,
+    noise_filter_ratio: float,
+    graph_window_size: int,
 ) -> None:
     """
     Full post-processing pipeline for a recorded squat video.
@@ -111,13 +126,13 @@ def run_post_processing(
       5. Write annotated video with skeleton overlay
       6. Write side-by-side video with pose + velocity graph
     """
-    # Accept either a named key ('front'/'side') or a direct file path
+    # Accept either a named video key 
     if os.path.isfile(video_key):
         video_path = video_key
     else:
         video_path = VIDEOS.get(video_key)
     if video_path is None:
-        print(f"Unknown video key '{video_key}'. Use 'front', 'side', or a direct file path.")
+        print(f"Unknown video key '{video_key}'. Please use a defined file path")
         sys.exit(1)
 
     if not os.path.exists(video_path):
@@ -131,6 +146,10 @@ def run_post_processing(
         pixels_per_meter=pixels_per_meter,
         filter_cutoff=filter_cutoff,
         model_complexity=model_complexity,
+        confidence_threshold=confidence_threshold,
+        max_missing_frames=max_missing_frames,
+        velocity_threshold=velocity_threshold,
+        noise_filter_ratio=noise_filter_ratio,
     )
 
     if results is None:
@@ -151,7 +170,7 @@ def run_post_processing(
     # 4. Side-by-side pose + velocity visualization
     video_label = os.path.splitext(os.path.basename(video_key))[0] if os.path.isfile(video_key) else video_key
     visual_path = os.path.join(OUTPUT_DIR, f'analyse_{video_label}.mp4')
-    visualise_pose_with_velocity(video_path, results, output_path=visual_path, model_complexity=2)
+    visualise_pose_with_velocity(video_path, results, output_path=visual_path, model_complexity=model_complexity, graph_window_size=graph_window_size)
 
     print("\nAll done.")
     print("  velocity_plot.png     – velocity-time graph")
@@ -197,14 +216,25 @@ def main() -> None:
     # CONFIGURE HERE — edit these values, then run python main.py
     # =========================================================
 
-    VIDEO      = 'foc'   # key from VIDEOS dict above, or a full file path
-                           # e.g. 'normal', 'slow', or r'C:\path\to\video.mp4'
+    VIDEO      = 'HPESIDE'  # key from VIDEOS dict above, or a full file path
 
     REALTIME   = False     # set True to use live camera instead of a video file
 
+    # -- Core settings
     PPM        = None      # pixels per metre for m/s output (None = use px/s)
-    CUTOFF     = 6.0       # Butterworth filter cutoff in Hz
-    COMPLEXITY = 2         # MediaPipe model: 0=fast/less accurate, 2=slow/most accurate
+    CUTOFF     = 6.0       # Butterworth filter cutoff in Hz           (default: 6.0)
+    COMPLEXITY = 2         # MediaPipe model: 0=fast, 1=balanced, 2=accurate (default: 2)
+
+    # -- Detection quality
+    CONFIDENCE  = 0.3      # min pose confidence to accept a frame     (default: 0.3)
+    MAX_MISSING = 5        # consecutive missed frames to interpolate   (default: 5)
+
+    # -- Rep detection
+    VEL_THRESHOLD = 5.0    # min speed (px/s) to count as movement     (default: 5.0)
+    NOISE_RATIO   = 0.15   # discard phases below X% of fastest rep    (default: 0.15)
+
+    # -- Video output
+    GRAPH_WINDOW  = 150    # frames of history in scrolling graph       (default: 150)
 
     # =========================================================
 
@@ -222,6 +252,11 @@ def main() -> None:
             pixels_per_meter=PPM,
             filter_cutoff=CUTOFF,
             model_complexity=COMPLEXITY,
+            confidence_threshold=CONFIDENCE,
+            max_missing_frames=MAX_MISSING,
+            velocity_threshold=VEL_THRESHOLD,
+            noise_filter_ratio=NOISE_RATIO,
+            graph_window_size=GRAPH_WINDOW,
         )
 
 

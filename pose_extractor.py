@@ -10,12 +10,11 @@ import numpy as np
 
 class PoseExtractor:
     """Extracts body keypoints from video frames using MediaPipe BlazePose."""
-
-    # MediaPipe landmark indices (Section 5.2 of guide)
-    LEFT_SHOULDER  = 11
-    RIGHT_SHOULDER = 12
-    LEFT_HIP       = 23
-    RIGHT_HIP      = 24
+    # MediaPipe landmark indices 
+    LEFT_SHOULDER  = 11 #second priority
+    RIGHT_SHOULDER = 12 #second priority
+    LEFT_HIP       = 23 #main priority
+    RIGHT_HIP      = 24 #main priority
     LEFT_KNEE      = 25
     RIGHT_KNEE     = 26
     LEFT_ANKLE     = 27

@@ -84,7 +84,6 @@ class PositionTracker:
     Maintains a history of (x, y) joint positions with linear interpolation
     over short detection gaps.
     """
-
     def __init__(self, max_missing_frames: int = 5):
         """
         Args:
@@ -108,7 +107,7 @@ class PositionTracker:
         Args:
             position   : (x, y) in pixels, or None if pose was not detected.
             timestamp  : Frame timestamp in seconds.
-            confidence : Landmark visibility score (0–1).
+            confidence : Landmark visibility score (0-1).
 
         Returns:
             True if a position was stored (detected or interpolated).
@@ -343,6 +342,9 @@ def calculate_hip_velocity(
     filter_cutoff: float = 6.0,
     confidence_threshold: float = 0.3,
     model_complexity: int = 2,
+    max_missing_frames: int = 5,
+    velocity_threshold: float = 5.0,
+    noise_filter_ratio: float = 0.15,
 ) -> Optional[dict]:
     """
     Extract vertical hip velocity from a squat video (post-processing).
@@ -366,11 +368,8 @@ def calculate_hip_velocity(
         Results dict, or None on failure.
     """
     extractor = PoseExtractor(model_complexity=model_complexity)
-    tracker   = PositionTracker(max_missing_frames=5)
-
-    # Phase threshold: 0.05 m/s if calibrated, 5 px/s if not (both represent near-zero movement)
-    vel_threshold = 0.05 if pixels_per_meter else 5.0
-    phase_detector = RepPhaseDetector(velocity_threshold=vel_threshold)
+    tracker   = PositionTracker(max_missing_frames=max_missing_frames)
+    phase_detector = RepPhaseDetector(velocity_threshold=velocity_threshold)
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -392,6 +391,7 @@ def calculate_hip_velocity(
     print(f"{'='*55}\n")
 
     frame_count = 0
+    landmarks_cache = []  # stores pose_landmarks per frame for reuse in visualization
     print("Extracting pose landmarks…")
 
     while cap.isOpened():
@@ -403,6 +403,7 @@ def calculate_hip_velocity(
         timestamp = frame_count / fps
 
         landmarks, confidence = extractor.process_frame(frame)
+        landmarks_cache.append(extractor.pose_landmarks)  # None if not detected
 
         if landmarks is not None and confidence >= confidence_threshold:
             position, conf = extractor.get_hip_center(landmarks, frame_w, frame_h)
@@ -445,7 +446,7 @@ def calculate_hip_velocity(
     valid_phases = [(s, e) for s, e in concentric_phases if e - s >= 5]
     if valid_phases:
         global_peak = max(float(np.max(filtered_vel[s:e])) for s, e in valid_phases)
-        min_peak    = global_peak * 0.15
+        min_peak    = global_peak * noise_filter_ratio
         valid_phases = [(s, e) for s, e in valid_phases if float(np.max(filtered_vel[s:e])) >= min_peak]
 
     reps: List[RepData] = []
@@ -511,6 +512,7 @@ def calculate_hip_velocity(
         'fps':               fps,
         'total_frames':      frame_count,
         'unit':              unit,
+        'landmarks_cache':   landmarks_cache,  # reused by visualiser — avoids second MediaPipe pass
     }
 
 
@@ -632,6 +634,8 @@ def visualise_pose_with_velocity(
         print("No results provided; skipping visualization.")
         return
 
+    # Use cached landmarks from pass 1 if available — skips re-running MediaPipe
+    landmarks_cache = results.get('landmarks_cache')
     extractor = PoseExtractor(model_complexity=model_complexity)
     cap = cv2.VideoCapture(video_path)
 
@@ -667,8 +671,11 @@ def visualise_pose_with_velocity(
         if not ret:
             break
 
-        # -- Left panel: pose with skeleton
-        extractor.process_frame(frame)
+        # -- Left panel: pose with skeleton (use cached landmarks, no second MediaPipe pass)
+        if landmarks_cache and frame_idx < len(landmarks_cache):
+            extractor.pose_landmarks = landmarks_cache[frame_idx]
+        else:
+            extractor.process_frame(frame)
         extractor.draw_pose(frame)
 
         # -- Right panel: velocity graph
