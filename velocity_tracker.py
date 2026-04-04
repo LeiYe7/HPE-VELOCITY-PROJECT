@@ -55,7 +55,7 @@ def butterworth_lowpass_filter(
     order: int = 2,
 ) -> np.ndarray:
     """
-    Apply zero-phase Butterworth low-pass filter (Section 9.2).
+    Apply zero-phase Butterworth low-pass filter 
 
     Uses filtfilt for zero phase distortion — suitable for post-processing.
 
@@ -76,7 +76,7 @@ def butterworth_lowpass_filter(
 
 
 # ===========================================================================
-# Position tracker (Section 7.3)
+# Position tracker
 # ===========================================================================
 
 class PositionTracker:
@@ -137,7 +137,7 @@ class PositionTracker:
 
 
 # ===========================================================================
-# Phase detector (Section 8.3)
+# Phase detector 
 # ===========================================================================
 
 class RepPhaseDetector:
@@ -252,7 +252,7 @@ class RepPhaseDetector:
 
 
 # ===========================================================================
-# Velocity metrics (Section 8.4)
+# Velocity metrics
 # ===========================================================================
 
 class VelocityMetrics:
@@ -349,7 +349,7 @@ def calculate_hip_velocity(
     """
     Extract vertical hip velocity from a squat video (post-processing).
 
-    The full processing pipeline (Section 2.3):
+    The full processing pipeline:
       1. Frame-by-frame pose extraction with PoseExtractor
       2. Position tracking with gap interpolation (PositionTracker)
       3. Vertical velocity from finite differences
@@ -769,12 +769,12 @@ def visualise_pose_with_velocity(
 
 
 # ===========================================================================
-# Real-time tracker (live camera, Section 10)
+# Real-time tracker (live camera - future work)
 # ===========================================================================
 
 class SquatVelocityTracker:
     """
-    Real-time barbell velocity tracker using a live camera feed (Section 13.1).
+    Real-time barbell velocity tracker using a live camera feed 
 
     Usage::
 

@@ -215,26 +215,26 @@ def main() -> None:
     # =========================================================
     # CONFIGURE HERE — edit these values, then run python main.py
     # =========================================================
-
-    VIDEO      = 'HPESIDE'  # key from VIDEOS dict above, or a full file path
-
+    #1 key from VIDEOS dict above, or a full file path
+    VIDEO      = 'foc'  
+    #2 MediaPipe model: 0=fast, 1=balanced, 2=accurate (default: 2)
+    COMPLEXITY = 2         
+    #3 The minimum landmark visibility confidence to accept a frame (default: 0.3)
+    CONFIDENCE  = 0.3     
+    #4 consecutive missed frames for estimation step (default: 5)
+    MAX_MISSING = 5 
+    #5 Butterworth filter cutoff in Hz (default: 6.0)
+    CUTOFF     = 6.0       
+    #6 The min speed (px/s) to count as concentric/eccentric movement (default: 5.0)
+    VEL_THRESHOLD = 5.0   
+    #7 discard phases below X% of fastest rep (default: 0.15)
+    NOISE_RATIO   = 0.15   
+    #8 frames of history in scrolling graph in output visualisation (default: 150, i.e. 5 seconds at 30fps)
+    GRAPH_WINDOW  = 150          
+    
+    # future 
+    PPM        = None # calibration     
     REALTIME   = False     # set True to use live camera instead of a video file
-
-    # -- Core settings
-    PPM        = None      # pixels per metre for m/s output (None = use px/s)
-    CUTOFF     = 6.0       # Butterworth filter cutoff in Hz           (default: 6.0)
-    COMPLEXITY = 2         # MediaPipe model: 0=fast, 1=balanced, 2=accurate (default: 2)
-
-    # -- Detection quality
-    CONFIDENCE  = 0.3      # min pose confidence to accept a frame     (default: 0.3)
-    MAX_MISSING = 5        # consecutive missed frames to interpolate   (default: 5)
-
-    # -- Rep detection
-    VEL_THRESHOLD = 5.0    # min speed (px/s) to count as movement     (default: 5.0)
-    NOISE_RATIO   = 0.15   # discard phases below X% of fastest rep    (default: 0.15)
-
-    # -- Video output
-    GRAPH_WINDOW  = 150    # frames of history in scrolling graph       (default: 150)
 
     # =========================================================
 

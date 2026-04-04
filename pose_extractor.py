@@ -46,7 +46,7 @@ class PoseExtractor:
     # ------------------------------------------------------------------
     # Core frame processing
     # ------------------------------------------------------------------
-
+    #extracting pose landmarks from each frame
     def process_frame(self, frame: np.ndarray):
         """
         Extract pose landmarks from a single BGR video frame.
@@ -78,7 +78,7 @@ class PoseExtractor:
         return landmarks, confidence
 
     # ------------------------------------------------------------------
-    # Joint centre helpers
+    # Calculate landmark centres
     # ------------------------------------------------------------------
 
     def get_hip_center(
