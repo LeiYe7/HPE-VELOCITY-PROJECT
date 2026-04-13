@@ -91,7 +91,6 @@ class PoseExtractor:
         Midpoint between the left and right hips in pixel coordinates.
 
         The hip centre closely approximates barbell position during a back squat
-        (Section 7.2 of guide).
 
         Returns:
             position  : (x, y) numpy array in pixels.

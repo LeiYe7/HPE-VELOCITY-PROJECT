@@ -216,7 +216,7 @@ def main() -> None:
     # CONFIGURE HERE — edit these values, then run python main.py
     # =========================================================
     #1 key from VIDEOS dict above, or a full file path
-    VIDEO      = 'foc'  
+    VIDEO      = 'normal'  
     #2 MediaPipe model: 0=fast, 1=balanced, 2=accurate (default: 2)
     COMPLEXITY = 2         
     #3 The minimum landmark visibility confidence to accept a frame (default: 0.3)

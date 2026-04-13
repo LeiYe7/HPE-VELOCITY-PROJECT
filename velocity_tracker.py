@@ -68,10 +68,10 @@ def butterworth_lowpass_filter(
     Returns:
         Filtered signal of the same length.
     """
-    nyquist = sample_rate / 2.0
-    normalized_cutoff = min(cutoff_freq / nyquist, 0.99)  # butter expects freq as fraction of Nyquist
-    b, a = butter(order, normalized_cutoff, btype='low')
-    return filtfilt(b, a, data)  # filtfilt = two-pass → zero phase delay
+    nyquist = sample_rate / 2.0                                # highest speed of wobble the camera can see
+    normalized_cutoff = min(cutoff_freq / nyquist, 0.99)        # cutoff as a fraction of that limit
+    b, a = butter(order, normalized_cutoff, btype='low')        # recipe that keeps slow motion, drops jitter
+    return filtfilt(b, a, data)                                 # smooth forwards + backwards (no time lag)
 
 
 
@@ -112,28 +112,28 @@ class PositionTracker:
         Returns:
             True if a position was stored (detected or interpolated).
         """
-        if position is None or confidence < 0.3:  # pose not detected or unreliable
+        if position is None or confidence < 0.3:                 # pose missing or too unreliable to trust
             self.missing_count += 1
             if self.missing_count <= self.max_missing and len(self.positions) >= 2:
-                interpolated = self._interpolate_position(timestamp)  # fill gap linearly
+                interpolated = self._interpolate_position(timestamp)  # guess the hip location from recent motion
                 self.positions.append(interpolated)
                 self.timestamps.append(timestamp)
                 return True
-            return False  # gap too long — discard
+            return False                                         # gap too long — give up on this frame
 
-        self.missing_count = 0  # reset on successful detection
+        self.missing_count = 0                                   # good detection — reset the "missing" counter
         self.positions.append(position)
         self.timestamps.append(timestamp)
         return True
 
     def _interpolate_position(self, timestamp: float) -> np.ndarray:
         """Linear extrapolation from the two most recent positions."""
-        dt = self.timestamps[-1] - self.timestamps[-2]
+        dt = self.timestamps[-1] - self.timestamps[-2]           # time between last two good frames
         if dt <= 0:
             return self.positions[-1].copy()
-        velocity = (self.positions[-1] - self.positions[-2]) / dt
-        new_dt   = timestamp - self.timestamps[-1]
-        return self.positions[-1] + velocity * new_dt
+        velocity = (self.positions[-1] - self.positions[-2]) / dt  # how fast the hip was moving just before
+        new_dt   = timestamp - self.timestamps[-1]               # how long since the last good frame
+        return self.positions[-1] + velocity * new_dt            # project forward: last position + speed × gap
 
 
 # ===========================================================================
@@ -166,18 +166,19 @@ class RepPhaseDetector:
         Returns:
             Phase string: 'concentric', 'eccentric', or 'stationary'.
         """
+        # Label each moment by what the lifter is doing based on hip speed.
         if velocity > self.velocity_threshold:
-            phase = 'concentric'   # moving upward (the lift)
+            phase = 'concentric'                 # moving up — the "lift" part of the rep
         elif velocity < -self.velocity_threshold:
-            phase = 'eccentric'    # moving downward (the descent)
+            phase = 'eccentric'                  # moving down — the "descent" part of the rep
         else:
-            phase = 'stationary'   # at the top or bottom between phases
+            phase = 'stationary'                 # holding still (top or bottom of squat)
 
-        if self.current_phase != phase:  # phase just changed
+        if self.current_phase != phase:          # phase just changed — mark key moments
             if self.current_phase == 'eccentric' and phase == 'concentric':
-                self.phase_history.append('bottom')  # transition = bottom of squat
+                self.phase_history.append('bottom')  # down → up = bottom of the squat
             elif self.current_phase == 'concentric' and phase in ('eccentric', 'stationary'):
-                self.phase_history.append('top')     # transition = rep complete
+                self.phase_history.append('top')     # up → stopped = rep finished
             self.current_phase = phase
 
         return phase
@@ -197,24 +198,25 @@ class RepPhaseDetector:
         Returns:
             List of (start_idx, end_idx) pairs (end is exclusive).
         """
-        # Reset state for a fresh pass
+        # Reset state so this scan starts fresh, ignoring any previous run.
         self.current_phase = 'stationary'
         self.phase_history = []
 
-        phases: List[Tuple[int, int]] = []
+        phases: List[Tuple[int, int]] = []                       # list of (start, end) indices for each "up" phase
         in_concentric = False
         start_idx: Optional[int] = None
 
+        # Walk through every velocity sample and note where upward motion begins and ends.
         for i, v in enumerate(velocities):
             phase = self.update(v)
             if phase == 'concentric' and not in_concentric:
                 in_concentric = True
-                start_idx = i
+                start_idx = i                                    # lifter just started going up
             elif phase != 'concentric' and in_concentric:
                 in_concentric = False
-                phases.append((start_idx, i))  # type: ignore[arg-type]
+                phases.append((start_idx, i))                    # lifter just finished going up
 
-        if in_concentric and start_idx is not None:
+        if in_concentric and start_idx is not None:              # video ended mid-lift — close the window anyway
             phases.append((start_idx, len(velocities)))
 
         return phases
@@ -266,11 +268,11 @@ class VelocityMetrics:
         Computed as total displacement / total time using trapezoidal
         integration (area under the velocity curve).
         """
-        total_time = float(timestamps[-1] - timestamps[0])
+        total_time = float(timestamps[-1] - timestamps[0])          # how long the "up" phase lasted
         if total_time <= 0:
             return 0.0
-        total_displacement = float(np.trapz(velocities, timestamps))
-        return total_displacement / total_time
+        total_displacement = float(np.trapz(velocities, timestamps))  # total distance travelled (area under speed curve)
+        return total_displacement / total_time                       # average speed = distance ÷ time
 
     @staticmethod
     def peak_velocity(velocities: np.ndarray) -> float:
@@ -285,15 +287,15 @@ class VelocityMetrics:
         Args:
             percentage: 0–100 (e.g. 50 = mid-point of the lift).
         """
-        idx = int(len(velocities) * percentage / 100)
-        idx = min(idx, len(velocities) - 1)
+        idx = int(len(velocities) * percentage / 100)        # jump to that % of the way through the lift
+        idx = min(idx, len(velocities) - 1)                  # guard: don't overshoot the last sample
         return float(velocities[idx])
 
     @staticmethod
     def time_to_peak(velocities: np.ndarray, timestamps: np.ndarray) -> float:
         """Time from start of concentric phase to peak velocity (s)."""
-        peak_idx = int(np.argmax(velocities))
-        return float(timestamps[peak_idx] - timestamps[0])
+        peak_idx = int(np.argmax(velocities))                # frame where the lifter was moving fastest
+        return float(timestamps[peak_idx] - timestamps[0])   # seconds elapsed from start of lift to that peak
 
 
 # ===========================================================================
@@ -319,16 +321,17 @@ def _calculate_vertical_velocity(
         1-D array of vertical velocities (length = len(positions) - 1).
     """
     velocities = []
+    # Compare each frame to the one before it to work out speed between them.
     for i in range(1, len(positions)):
-        dy_px = positions[i - 1][1] - positions[i][1]  # invert y: up = positive
-        dt    = timestamps[i] - timestamps[i - 1]
+        dy_px = positions[i - 1][1] - positions[i][1]           # change in hip height (flipped so up = positive)
+        dt    = timestamps[i] - timestamps[i - 1]               # time between the two frames
         if dt <= 0:
-            velocities.append(0.0)
+            velocities.append(0.0)                              # duplicate timestamp — can't divide, skip
             continue
         if pixels_per_meter is not None:
-            velocities.append((dy_px / pixels_per_meter) / dt)
+            velocities.append((dy_px / pixels_per_meter) / dt)  # calibrated → speed in metres per second
         else:
-            velocities.append(dy_px / dt)
+            velocities.append(dy_px / dt)                       # no calibration → speed in pixels per second
     return np.array(velocities)
 
 
@@ -367,16 +370,18 @@ def calculate_hip_velocity(
     Returns:
         Results dict, or None on failure.
     """
+    # Set up the three workers: body-landmark finder, hip-position recorder, up/down phase classifier.
     extractor = PoseExtractor(model_complexity=model_complexity)
     tracker   = PositionTracker(max_missing_frames=max_missing_frames)
     phase_detector = RepPhaseDetector(velocity_threshold=velocity_threshold)
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(video_path)                           # open the video file for reading
     if not cap.isOpened():
         print(f"Error: Could not open video: {video_path}")
         extractor.close()
         return None
 
+    # Pull basic video info (frame rate, size, length) — we need the FPS for speed calculations later.
     fps          = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_w      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -391,30 +396,31 @@ def calculate_hip_velocity(
     print(f"{'='*55}\n")
 
     frame_count = 0
-    landmarks_cache = []  # stores pose_landmarks per frame for reuse in visualization
+    landmarks_cache = []                                         # save each frame's skeleton so we can reuse it later
     print("Extracting pose landmarks…")
 
+    # ---- STEP 1: walk through the video frame by frame and find the hips in each one ----
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
-            break
+            break                                                # no more frames — end of video
 
         frame_count += 1
-        timestamp = frame_count / fps
+        timestamp = frame_count / fps                            # convert frame number to seconds
 
-        landmarks, confidence = extractor.process_frame(frame)
-        landmarks_cache.append(extractor.pose_landmarks)  # None if not detected
+        landmarks, confidence = extractor.process_frame(frame)   # ask MediaPipe where the body joints are
+        landmarks_cache.append(extractor.pose_landmarks)         # stash result (None if no person detected)
 
         if landmarks is not None and confidence >= confidence_threshold:
-            position, conf = extractor.get_hip_center(landmarks, frame_w, frame_h)
-            tracker.update(position, timestamp, conf)
+            position, conf = extractor.get_hip_center(landmarks, frame_w, frame_h)  # midpoint between the two hips
+            tracker.update(position, timestamp, conf)            # add this hip location to the history
         else:
-            tracker.update(None, timestamp, 0.0)
+            tracker.update(None, timestamp, 0.0)                 # no reliable detection — let tracker interpolate
             if frame_count % 30 == 0 or confidence < confidence_threshold:
                 print(f"  Frame {frame_count}: No / low-confidence detection")
 
         if frame_count % 30 == 0:
-            print(f"  Frame {frame_count}/{total_frames} …")
+            print(f"  Frame {frame_count}/{total_frames} …")     # progress update every ~1 second of footage
 
     cap.release()
     extractor.close()
@@ -426,63 +432,65 @@ def calculate_hip_velocity(
     positions  = tracker.positions
     timestamps = np.array(tracker.timestamps)
 
-    # Vertical velocity (raw)
+    # ---- STEP 2: turn the string of hip positions into frame-by-frame speeds ----
     raw_vel        = _calculate_vertical_velocity(positions, list(timestamps), pixels_per_meter)
-    vel_timestamps = timestamps[1:]  # one shorter than positions
+    vel_timestamps = timestamps[1:]                              # one speed per pair of frames, so one fewer
 
-    # Butterworth filter (needs ≥ 10 samples for stability)
+    # ---- STEP 3: smooth the speeds — real hips don't jerk; any jitter is camera/AI noise ----
     if len(raw_vel) >= 10:
         filtered_vel = butterworth_lowpass_filter(raw_vel, filter_cutoff, fps)
     else:
         print("Warning: Too few frames — skipping filter.")
         filtered_vel = raw_vel.copy()
 
-    # Phase detection → per-rep metrics
+    # ---- STEP 4: scan the smoothed speeds to find every "going up" and "going down" window ----
     concentric_phases = phase_detector.get_concentric_phases(filtered_vel, vel_timestamps)
     eccentric_phases  = phase_detector.get_eccentric_phases(filtered_vel)
 
-    # Pre-filter: find the strongest concentric phase, then discard any phase whose
-    # peak is below 15% of that — removes small noise bursts before/between real reps
+    # ---- STEP 5: throw away tiny wobbles that aren't real reps ----
+    # Keep only windows lasting at least 5 frames, and whose peak speed is a decent
+    # fraction of the fastest rep (filters out small twitches between real reps).
     valid_phases = [(s, e) for s, e in concentric_phases if e - s >= 5]
     if valid_phases:
-        global_peak = max(float(np.max(filtered_vel[s:e])) for s, e in valid_phases)
-        min_peak    = global_peak * noise_filter_ratio
+        global_peak = max(float(np.max(filtered_vel[s:e])) for s, e in valid_phases)  # fastest peak in the whole set
+        min_peak    = global_peak * noise_filter_ratio                                # minimum peak to count as a rep
         valid_phases = [(s, e) for s, e in valid_phases if float(np.max(filtered_vel[s:e])) >= min_peak]
 
     reps: List[RepData] = []
 
+    # ---- STEP 6: for each accepted rep, calculate the key metrics coaches care about ----
     for c_start, c_end in valid_phases:
-        v_seg = filtered_vel[c_start:c_end]
-        t_seg = vel_timestamps[c_start:c_end]
+        v_seg = filtered_vel[c_start:c_end]                     # speeds during the "up" part
+        t_seg = vel_timestamps[c_start:c_end]                   # matching timestamps
 
-        # Find the eccentric phase ending closest before this concentric starts
+        # Pair this "up" phase with the "down" phase just before it (that's one full rep).
         preceding_ecc = [
             (es, ee) for es, ee in eccentric_phases if ee <= c_start
         ]
         if preceding_ecc:
-            es, ee = preceding_ecc[-1]  # most recent descent before this lift
+            es, ee = preceding_ecc[-1]                          # most recent descent before this lift
             v_ecc = filtered_vel[es:ee]
             t_ecc = vel_timestamps[es:ee]
-            ecc_mean_speed = abs(VelocityMetrics.mean_velocity(v_ecc, t_ecc))
-            ecc_duration   = float(t_ecc[-1] - t_ecc[0])
+            ecc_mean_speed = abs(VelocityMetrics.mean_velocity(v_ecc, t_ecc))  # descent speed (positive number)
+            ecc_duration   = float(t_ecc[-1] - t_ecc[0])        # how long the descent took
         else:
-            ecc_mean_speed = 0.0
+            ecc_mean_speed = 0.0                                # first rep may have no recorded descent
             ecc_duration   = 0.0
 
         reps.append(RepData(
-            mean_velocity=VelocityMetrics.mean_velocity(v_seg, t_seg),
-            peak_velocity=VelocityMetrics.peak_velocity(v_seg),
-            duration=float(t_seg[-1] - t_seg[0]),
+            mean_velocity=VelocityMetrics.mean_velocity(v_seg, t_seg),   # MCV — average speed going up
+            peak_velocity=VelocityMetrics.peak_velocity(v_seg),          # PCV — fastest moment of the lift
+            duration=float(t_seg[-1] - t_seg[0]),                        # how long the lift took (seconds)
             eccentric_mean_speed=ecc_mean_speed,
             eccentric_duration=ecc_duration,
-            timestamps=t_seg - t_seg[0],
+            timestamps=t_seg - t_seg[0],                                 # shift so each rep starts at t=0
             velocities=v_seg,
         ))
 
-    # Summary statistics
-    avg_vel = float(np.mean(filtered_vel))
+    # Summary stats for the whole video.
+    avg_vel = float(np.mean(filtered_vel))                       # overall average hip speed
 
-    # Speed loss % vs Rep 1 (key VBT fatigue indicator)
+    # Baseline for the fatigue calculation — compare every later rep to rep 1.
     baseline_mcv = reps[0].mean_velocity if reps else 1.0
 
     print(f"\n{'='*60}")
@@ -493,8 +501,9 @@ def calculate_hip_velocity(
     print(f"{'Rep':<5} {'Conc (px/s)':>12} {'Ecc (px/s)':>11} {'Dur (s)':>8} {'Speed Loss':>11}")
     print(f"{'-'*60}")
     for i, rep in enumerate(reps, 1):
+        # Speed loss = how much slower this rep is vs rep 1, as a %. Big drop = big fatigue.
         loss_pct = (baseline_mcv - rep.mean_velocity) / baseline_mcv * 100 if baseline_mcv else 0.0
-        fatigue_flag = '  ← high fatigue' if loss_pct >= 20 else ''
+        fatigue_flag = '  ← high fatigue' if loss_pct >= 20 else ''   # 20% is a common cut-off in VBT coaching
         print(
             f"  {i:<3} {rep.mean_velocity:>12.1f} {rep.eccentric_mean_speed:>11.1f}"
             f" {rep.duration:>8.2f} {loss_pct:>9.1f}%{fatigue_flag}"
@@ -547,13 +556,14 @@ def plot_velocity(
         gridspec_kw={'height_ratios': [3, 1]},
     )
 
-    # -- Velocity trace --------------------------------------------------
-    ax_vel.plot(timestamps, velocities, 'b-', linewidth=1.5, zorder=3)
-    ax_vel.axhline(y=0, color='k', linewidth=0.8, alpha=0.4)
-    ax_vel.axhline(
+    # -- Top chart: speed over time --------------------------------------
+    ax_vel.plot(timestamps, velocities, 'b-', linewidth=1.5, zorder=3)    # blue line = hip speed at each moment
+    ax_vel.axhline(y=0, color='k', linewidth=0.8, alpha=0.4)              # black line at zero (no movement)
+    ax_vel.axhline(                                                       # red dashed line = average speed
         y=results['avg_velocity'], color='r', linestyle='--', linewidth=1.5,
     )
 
+    # Tint every "going up" section in green so reps stand out visually.
     for start_idx, end_idx in concentric_phases:
         t0 = timestamps[start_idx]
         t1 = timestamps[min(end_idx, len(timestamps) - 1)]
@@ -575,17 +585,17 @@ def plot_velocity(
     ax_vel.grid(True, alpha=0.3)
     ax_vel.legend(handles=legend_handles, fontsize=10)
 
-    # -- Per-rep bar chart -----------------------------------------------
+    # -- Bottom chart: one pair of bars per rep (average + peak) ---------
     if reps:
         rep_nums = list(range(1, len(reps) + 1))
-        mcvs     = [r.mean_velocity for r in reps]
-        pcvs     = [r.peak_velocity for r in reps]
+        mcvs     = [r.mean_velocity for r in reps]       # average speed of each rep
+        pcvs     = [r.peak_velocity for r in reps]       # fastest moment of each rep
         x        = np.arange(len(rep_nums))
-        width    = 0.35
+        width    = 0.35                                  # half-width so the two bars sit side by side
 
-        ax_rep.bar(x - width / 2, mcvs, width, label='MCV',
+        ax_rep.bar(x - width / 2, mcvs, width, label='MCV',            # blue bar = average speed
                    color='steelblue', alpha=0.85)
-        ax_rep.bar(x + width / 2, pcvs, width, label='PCV',
+        ax_rep.bar(x + width / 2, pcvs, width, label='PCV',            # orange bar = peak speed
                    color='darkorange', alpha=0.85)
         ax_rep.set_xticks(x)
         ax_rep.set_xticklabels([f'Rep {n}' for n in rep_nums])
@@ -634,7 +644,7 @@ def visualise_pose_with_velocity(
         print("No results provided; skipping visualization.")
         return
 
-    # Use cached landmarks from pass 1 if available — skips re-running MediaPipe
+    # Re-use the skeletons found earlier instead of running the detector again (huge time saver).
     landmarks_cache = results.get('landmarks_cache')
     extractor = PoseExtractor(model_complexity=model_complexity)
     cap = cv2.VideoCapture(video_path)
@@ -643,23 +653,24 @@ def visualise_pose_with_velocity(
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Output: side-by-side (left=pose, right=graph)
+    # Output video is twice as wide so we can place pose (left) next to the speed graph (right).
     output_width = width * 2
     output_height = height
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (output_width, output_height))
 
-    # Unpack results
+    # Pull the speed data we already calculated so we can draw it frame by frame.
     velocities = np.array(results['velocities'])
     timestamps = np.array(results['timestamps'])
     unit = results.get('unit', 'px/s')
     concentric_phases = results.get('concentric_phases', [])
 
-    # Map pre-computed velocities (one per position pair) onto every video frame
+    # We have one speed per pair of frames, but one video frame at a time — stretch
+    # the speed list so there's exactly one speed value per video frame.
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_velocities = np.interp(
-        np.arange(total_frames),   # target: one value per frame
-        np.arange(len(velocities)), # source indices
+        np.arange(total_frames),                     # target: one value per frame
+        np.arange(len(velocities)),                  # source indices
         velocities,
     )
 
@@ -671,27 +682,27 @@ def visualise_pose_with_velocity(
         if not ret:
             break
 
-        # -- Left panel: pose with skeleton (use cached landmarks, no second MediaPipe pass)
+        # -- LEFT PANEL: draw the skeleton onto the original frame --
         if landmarks_cache and frame_idx < len(landmarks_cache):
-            extractor.pose_landmarks = landmarks_cache[frame_idx]
+            extractor.pose_landmarks = landmarks_cache[frame_idx]   # grab pre-computed skeleton for this frame
         else:
-            extractor.process_frame(frame)
+            extractor.process_frame(frame)                          # fallback: detect live if no cache
         extractor.draw_pose(frame)
 
-        # -- Right panel: velocity graph
+        # -- RIGHT PANEL: a light-grey canvas we'll draw the speed graph on --
         graph_panel = np.ones((height, width, 3), dtype=np.uint8) * 240
 
-        # Draw velocity graph with scrolling window
+        # Show only the most recent chunk of speeds so the graph "scrolls" with the video.
         margin = 40
-        window_start = max(0, frame_idx - graph_window_size)
-        window_end = min(len(velocities), frame_idx + 1)
+        window_start = max(0, frame_idx - graph_window_size)        # earliest frame to show
+        window_end = min(len(velocities), frame_idx + 1)            # up to the current frame
         window_indices = np.arange(window_start, window_end)
 
         if len(window_indices) > 1:
             window_vels = velocities[window_start:window_end]
             window_times = timestamps[window_start:window_end]
 
-            # Map to pixel coordinates
+            # Define the drawable area inside the panel (leave a small margin around the edges).
             graph_w = width - 2 * margin
             graph_h = height - 2 * margin
             graph_x = margin
@@ -699,18 +710,18 @@ def visualise_pose_with_velocity(
 
             t_min = window_times[0]
             t_max = window_times[-1]
-            v_min = np.percentile(velocities, 5)
-            v_max = np.percentile(velocities, 95)
+            v_min = np.percentile(velocities, 5)                    # 5th/95th percentile trims outliers so the
+            v_max = np.percentile(velocities, 95)                   # graph doesn't get squashed by one bad spike
 
             if t_max > t_min and v_max > v_min:
-                # Convert time/velocity values to pixel coordinates in the graph area
+                # Convert each (time, speed) reading into a pixel position on the canvas.
                 px_points = [
-                    int(graph_x + (t - t_min) / (t_max - t_min) * graph_w)
+                    int(graph_x + (t - t_min) / (t_max - t_min) * graph_w)   # time → left-to-right pixel
                     for t in window_times
                 ]
                 py_points = [
                     int(graph_y + graph_h - (v - v_min) / (v_max - v_min) * graph_h)
-                    for v in window_vels  # y is inverted: higher velocity → smaller y (higher on screen)
+                    for v in window_vels                                      # speed → top-to-bottom pixel (flipped)
                 ]
 
                 # 1. Phase shading first — semi-transparent tint so velocity line remains visible
@@ -736,14 +747,14 @@ def visualise_pose_with_velocity(
                 cv2.line(graph_panel, (graph_x, graph_y),
                         (graph_x, graph_y + graph_h), (100, 100, 100), 1)
 
-                # 3. Velocity line on top of shading so it's always visible
+                # 3. Draw the speed line segment by segment, colouring by direction of motion.
                 for i in range(1, len(px_points)):
                     pt1 = (px_points[i - 1], py_points[i - 1])
                     pt2 = (px_points[i], py_points[i])
-                    color = (0, 255, 0) if window_vels[i] > 0 else (0, 0, 255)  # green=up, red=down
+                    color = (0, 255, 0) if window_vels[i] > 0 else (0, 0, 255)   # green = going up, red = going down
                     cv2.line(graph_panel, pt1, pt2, color, 2)
 
-                # 4. Current frame marker
+                # 4. Blue dot on the right-hand edge marks the current frame's speed.
                 if len(px_points) > 0:
                     cv2.circle(graph_panel, (px_points[-1], py_points[-1]), 6,
                               (255, 0, 0), -1)
@@ -822,13 +833,15 @@ class SquatVelocityTracker:
     # ------------------------------------------------------------------
 
     def _init_realtime_filter(self, cutoff: float, sample_rate: int) -> None:
-        nyquist           = sample_rate / 2.0
-        normalized_cutoff = min(cutoff / nyquist, 0.99)
-        self._b, self._a  = butter(2, normalized_cutoff, btype='low')
-        self._filt_state  = np.zeros(max(len(self._a), len(self._b)) - 1)  # stateful buffer for lfilter
+        nyquist           = sample_rate / 2.0                                  # fastest detectable wobble
+        normalized_cutoff = min(cutoff / nyquist, 0.99)                        # cutoff as fraction of that limit
+        self._b, self._a  = butter(2, normalized_cutoff, btype='low')          # smoothing recipe
+        self._filt_state  = np.zeros(max(len(self._a), len(self._b)) - 1)      # memory buffer — live data has no "future"
 
     def _filter_sample(self, sample: float) -> float:
         """Process one sample through a stateful causal filter."""
+        # Smooth one new reading at a time, remembering the last few so each
+        # new speed value is softened by its recent neighbours.
         filtered, self._filt_state = lfilter(
             self._b, self._a, [sample], zi=self._filt_state
         )
@@ -876,10 +889,10 @@ class SquatVelocityTracker:
         cv2.destroyWindow('Calibration')
 
         if len(points) == 2:
-            px_dist = float(np.linalg.norm(
+            px_dist = float(np.linalg.norm(                        # straight-line distance (in pixels) between clicks
                 np.array(points[1]) - np.array(points[0])
             ))
-            self.pixels_per_meter = px_dist / known_distance_meters
+            self.pixels_per_meter = px_dist / known_distance_meters  # scale factor: how many pixels = 1 real metre
             print(f"Calibration: {self.pixels_per_meter:.1f} px/m")
         else:
             print("Calibration cancelled.")
@@ -896,11 +909,11 @@ class SquatVelocityTracker:
 
     def _compute_velocity(self) -> Optional[float]:
         if len(self.positions) < 2:
-            return None
-        dy_px = self.positions[-2][1] - self.positions[-1][1]   # invert y so upward = positive
-        dy_m  = dy_px / self.pixels_per_meter  # convert pixels to metres
-        dt    = self.timestamps[-1] - self.timestamps[-2]
-        return dy_m / dt if dt > 0 else None  # m/s
+            return None                                              # need at least two frames to measure motion
+        dy_px = self.positions[-2][1] - self.positions[-1][1]        # pixels the hip moved (flipped so up = positive)
+        dy_m  = dy_px / self.pixels_per_meter                        # convert pixels to real-world metres
+        dt    = self.timestamps[-1] - self.timestamps[-2]            # seconds between the two frames
+        return dy_m / dt if dt > 0 else None                         # speed = distance ÷ time, in m/s
 
     def _filter_velocities(self, velocities: np.ndarray) -> np.ndarray:
         if len(velocities) < 10:
@@ -966,10 +979,11 @@ class SquatVelocityTracker:
 
                 new_phase = self.phase_detector.update(filtered_velocity)
 
+                # Detect the two moments that mark a rep: hitting the bottom and reaching the top.
                 if self.current_phase == 'eccentric' and new_phase == 'concentric':
-                    self.rep_start_idx = len(self.velocities) - 1  # bottom of squat — rep begins
+                    self.rep_start_idx = len(self.velocities) - 1               # just hit the bottom — start timing the lift
                 elif self.current_phase == 'concentric' and new_phase != 'concentric':
-                    self._process_rep_completion(len(self.velocities))  # top of squat — rep done
+                    self._process_rep_completion(len(self.velocities))          # just reached the top — finalise the rep
                     self.rep_start_idx = None
 
                 self.current_phase = new_phase
@@ -1018,21 +1032,21 @@ class SquatVelocityTracker:
             cv2.putText(frame, f"Last PCV: {last.peak_velocity:.2f} m/s",
                         (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
 
-        # Velocity bar on the right edge — grows up (green) when lifting, down (red) when descending
+        # Live speed bar on the right — length shows how fast, colour shows direction.
         if velocity is not None:
             bar_x      = w - 80
-            bar_y      = h // 2  # mid-screen = zero velocity
-            bar_height = int(min(abs(velocity) * 200, 400))  # scale to pixels, cap at 400
-            bar_color  = (0, 255, 0) if velocity > 0 else (0, 0, 255)  # green=up, red=down
+            bar_y      = h // 2                                             # middle of the screen = zero speed
+            bar_height = int(min(abs(velocity) * 200, 400))                 # longer bar = faster movement (capped)
+            bar_color  = (0, 255, 0) if velocity > 0 else (0, 0, 255)       # green while lifting, red while descending
             if velocity > 0:
                 cv2.rectangle(frame,
-                              (bar_x, bar_y - bar_height),  # bar grows upward
+                              (bar_x, bar_y - bar_height),                  # going up → bar extends upward from centre
                               (bar_x + 50, bar_y),
                               bar_color, -1)
             else:
                 cv2.rectangle(frame,
                               (bar_x, bar_y),
-                              (bar_x + 50, bar_y + bar_height),  # bar grows downward
+                              (bar_x + 50, bar_y + bar_height),             # going down → bar extends downward
                               bar_color, -1)
 
         return frame
@@ -1077,15 +1091,15 @@ class SquatVelocityTracker:
         """Return aggregate statistics for the session."""
         if not self.reps:
             return {}
-        mcvs = [r.mean_velocity for r in self.reps]
-        pcvs = [r.peak_velocity for r in self.reps]
+        mcvs = [r.mean_velocity for r in self.reps]    # average speed of every rep
+        pcvs = [r.peak_velocity for r in self.reps]    # fastest moment of every rep
         return {
             'total_reps': len(self.reps),
-            'mean_mcv':   float(np.mean(mcvs)),
-            'std_mcv':    float(np.std(mcvs)),
-            'mean_pcv':   float(np.mean(pcvs)),
+            'mean_mcv':   float(np.mean(mcvs)),         # typical average speed across the set
+            'std_mcv':    float(np.std(mcvs)),          # how much average speed varied between reps
+            'mean_pcv':   float(np.mean(pcvs)),         # typical peak speed
             'std_pcv':    float(np.std(pcvs)),
-            'velocity_loss_pct': (
+            'velocity_loss_pct': (                      # how much slower the last rep was vs the first — fatigue marker
                 (mcvs[0] - mcvs[-1]) / mcvs[0] * 100
                 if len(mcvs) > 1 else 0.0
             ),
