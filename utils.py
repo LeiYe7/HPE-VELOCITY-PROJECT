@@ -1,5 +1,5 @@
 """
-Utils Module
+Utils Module (FUTURE WORK)
 Calibration helpers, validation metrics, and Bland-Altman analysis
 for the HPE velocity tracking system.
 """
@@ -14,7 +14,7 @@ from scipy import stats
 
 
 # ===========================================================================
-# Spatial calibration (Section 6.2)
+# Spatial calibration 
 # ===========================================================================
 
 def calculate_scale(
@@ -49,7 +49,7 @@ def calculate_scale(
 
 
 # ===========================================================================
-# Validation metrics (Section 11.2)
+# Validation metrics 
 # ===========================================================================
 
 def calculate_validation_metrics(
@@ -131,7 +131,7 @@ def print_validation_report(metrics: dict, unit: str = 'm/s') -> None:
 
 
 # ===========================================================================
-# Bland-Altman analysis (Section 11.3)
+# Bland-Altman analysis 
 # ===========================================================================
 
 def bland_altman_plot(
@@ -196,7 +196,7 @@ def bland_altman_plot(
 
 
 # ===========================================================================
-# Frame timing utility (Section 6.3)
+# Frame timing utility 
 # ===========================================================================
 
 class FrameTimer:

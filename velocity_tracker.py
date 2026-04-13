@@ -29,7 +29,7 @@ from pose_extractor import PoseExtractor
 
 
 # ===========================================================================
-# Data class
+# Data class (data storage for output)
 # ===========================================================================
 
 @dataclass
